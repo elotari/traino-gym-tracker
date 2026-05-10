@@ -11,7 +11,6 @@ import { DailyLog, DayCompliance, Profile } from '@/types'
 import { buildCalendar, getWeeklyWorkoutCount, smartPredict } from '@/lib/compliance'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { toast } from 'sonner'
 
 // ─── Mini SVG ring ────────────────────────────────────────────────────────────
@@ -59,7 +58,7 @@ export default function DashboardPage() {
   const [selectedDay, setSelectedDay] = useState<DayCompliance | null>(null)
   const [loading, setLoading] = useState(true)
   const [showRestart, setShowRestart] = useState(false)
-  const [restartConfirm, setRestartConfirm] = useState('')
+  const [restartConfirm, setRestartConfirm] = useState(false)
   const [restarting, setRestarting] = useState(false)
   const today = format(new Date(), 'yyyy-MM-dd')
 
@@ -81,10 +80,7 @@ export default function DashboardPage() {
 
   // ── Restart challenge ─────────────────────────────────────────────────────
   const handleRestart = async () => {
-    if (restartConfirm !== 'إعادة التحدي') {
-      toast.error('اكتب النص الصحيح للتأكيد')
-      return
-    }
+    if (!restartConfirm) return
     setRestarting(true)
     try {
       const startDate = format(new Date(), 'yyyy-MM-dd')
@@ -98,7 +94,7 @@ export default function DashboardPage() {
       setLogs([])
       setCalendar([])
       setShowRestart(false)
-      setRestartConfirm('')
+      setRestartConfirm(false)
       toast.success('تم إعادة التحدي! يلا من الأول 💪')
     } catch (err) {
       toast.error(`خطأ: ${err instanceof Error ? err.message : 'حاول مرة ثانية'}`)
@@ -580,29 +576,20 @@ export default function DashboardPage() {
                 </p>
               </div>
 
-              <p className="text-gray-400 text-sm mb-2">اكتب <span className="text-white font-bold">إعادة التحدي</span> للتأكيد:</p>
-              <Input
-                value={restartConfirm}
-                onChange={(e) => setRestartConfirm(e.target.value)}
-                placeholder="إعادة التحدي"
-                className="bg-white/5 border-white/10 text-white h-12 mb-4 text-right"
-                dir="rtl"
-              />
-
               <div className="flex gap-3">
+                <Button
+                  onClick={handleRestart}
+                  disabled={restarting}
+                  className="flex-1 h-12 bg-red-500 hover:bg-red-600 text-white font-bold"
+                >
+                  {restarting ? 'جاري...' : '🔄 نعم، إعادة التحدي'}
+                </Button>
                 <Button
                   onClick={() => setShowRestart(false)}
                   variant="outline"
                   className="flex-1 h-12 border-white/20 text-gray-300"
                 >
                   إلغاء
-                </Button>
-                <Button
-                  onClick={handleRestart}
-                  disabled={restartConfirm !== 'إعادة التحدي' || restarting}
-                  className="flex-1 h-12 bg-red-500 hover:bg-red-600 text-white font-bold disabled:opacity-40"
-                >
-                  {restarting ? 'جاري...' : '🔄 إعادة التحدي'}
                 </Button>
               </div>
             </motion.div>
