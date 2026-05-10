@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { addMonths, differenceInDays, format, startOfMonth, getDaysInMonth, getDay } from 'date-fns'
 import { ar } from 'date-fns/locale'
-import { Flame, Dumbbell, X, TrendingDown, TrendingUp, RotateCcw, Target } from 'lucide-react'
+import { Flame, Dumbbell, X, RotateCcw, Target, Trophy } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useStore } from '@/store/useStore'
 import { DailyLog, DayCompliance, Profile } from '@/types'
@@ -22,7 +22,7 @@ function Ring({
   const circ = 2 * Math.PI * r
   const offset = circ * (1 - Math.min(pct, 100) / 100)
   return (
-    <div className="flex flex-col items-center gap-1">
+    <div className="flex flex-col items-center gap-0.5 w-11">
       <svg width="40" height="40" viewBox="0 0 36 36" className="-rotate-90">
         <circle cx="18" cy="18" r={r} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="3" />
         <circle
@@ -30,17 +30,17 @@ function Ring({
           strokeDasharray={`${circ - offset} ${offset}`} strokeLinecap="round"
         />
       </svg>
-      <p className="text-white text-[10px] font-black -mt-8 leading-none">{Math.round(pct)}%</p>
-      <div className="mt-4 text-center">
-        <p className="text-gray-300 text-[10px] font-medium">{label}</p>
-        {sublabel && <p className="text-gray-500 text-[9px]">{sublabel}</p>}
+      <p className="text-white text-[9px] font-black -mt-8 leading-none">{Math.round(pct)}%</p>
+      <div className="mt-4 text-center w-full">
+        <p className="text-gray-300 text-[8px] font-medium leading-tight text-center break-words">{label}</p>
+        {sublabel && <p className="text-[#39FF14] text-[7px] font-bold">{sublabel}</p>}
       </div>
     </div>
   )
 }
 
-// ─── Day label helpers ────────────────────────────────────────────────────────
-const DAY_SHORT = ['أح', 'إث', 'ثل', 'أر', 'خم', 'جم', 'سب']
+// ─── Day labels (Sunday-first, Kuwait) ───────────────────────────────────────
+const DAY_FULL = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت']
 
 function getLastNDays(n: number): string[] {
   return Array.from({ length: n }, (_, i) => {
@@ -145,7 +145,7 @@ export default function DashboardPage() {
   // ── Calendar ──────────────────────────────────────────────────────────────
   const monthStart = startOfMonth(calMonth)
   const daysInMonth = getDaysInMonth(calMonth)
-  const startDayOfWeek = (getDay(monthStart) + 6) % 7
+  const startDayOfWeek = getDay(monthStart) // Sunday = 0 (Kuwait week)
   const monthStr = format(calMonth, 'yyyy-MM')
   const calendarDayMap = new Map(calendar.map((d) => [d.date, d]))
 
@@ -209,6 +209,18 @@ export default function DashboardPage() {
           </div>
         </motion.div>
 
+        {/* ── Challenge Conditions Header ── */}
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.04 }}
+          className="bg-[#39FF14]/5 border border-[#39FF14]/20 rounded-2xl p-4">
+          <div className="flex items-center gap-2 mb-1">
+            <Trophy className="w-5 h-5 text-[#39FF14] flex-shrink-0" />
+            <h2 className="text-white font-black text-base">شروط التحدي الأسبوعية</h2>
+          </div>
+          <p className="text-gray-400 text-xs leading-relaxed">
+            هذي هي المعايير اللي لازم تلتزم فيها <span className="text-white font-bold">كل أسبوع</span> على مدار <span className="text-[#39FF14] font-bold">4 أشهر</span> كاملة — خطوات يومية، ماء، حديد، وكارديو.
+          </p>
+        </motion.div>
+
         {/* ── Steps — 7-day rings ── */}
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.05 }}
           className="card-dark rounded-2xl p-4">
@@ -228,7 +240,7 @@ export default function DashboardPage() {
                   key={date}
                   pct={pct}
                   color={pct >= 100 ? '#39FF14' : pct >= 50 ? '#A78BFA' : '#374151'}
-                  label={DAY_SHORT[dayOfWeek]}
+                  label={DAY_FULL[dayOfWeek]}
                   sublabel={isToday ? 'اليوم' : undefined}
                 />
               )
@@ -255,7 +267,7 @@ export default function DashboardPage() {
                   key={date}
                   pct={pct}
                   color={pct >= 100 ? '#39FF14' : pct >= 50 ? '#38BDF8' : '#374151'}
-                  label={DAY_SHORT[dayOfWeek]}
+                  label={DAY_FULL[dayOfWeek]}
                   sublabel={isToday ? 'اليوم' : undefined}
                 />
               )
@@ -316,7 +328,7 @@ export default function DashboardPage() {
           </div>
 
           <div className="grid grid-cols-7 mb-1">
-            {['إث', 'ثل', 'أر', 'خم', 'جم', 'سب', 'أح'].map((d) => (
+            {['أح', 'إث', 'ثل', 'أر', 'خم', 'جم', 'سب'].map((d) => (
               <div key={d} className="text-center text-gray-600 text-[10px] py-1">{d}</div>
             ))}
           </div>
