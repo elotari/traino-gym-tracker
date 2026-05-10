@@ -217,7 +217,7 @@ export default function OnboardingPage() {
         </div>
 
         {/* Nav Buttons */}
-        <div className="py-5 flex gap-3">
+        <div className="pt-5 pb-24 flex gap-3">
           {step > 0 && (
             <Button type="button" onClick={() => setStep(step - 1)} variant="outline"
               className="flex-1 h-14 border-white/20 text-gray-300 hover:bg-white/5 rounded-2xl">
