@@ -52,7 +52,7 @@ function getLastNDays(n: number): string[] {
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 export default function DashboardPage() {
-  const { user, profile, streak, setProfile } = useStore()
+  const { user, profile, streak, setProfile, logsSavedAt } = useStore()
   const [logs, setLogs] = useState<DailyLog[]>([])
   const [calendar, setCalendar] = useState<DayCompliance[]>([])
   const [calMonth, setCalMonth] = useState(new Date())
@@ -77,7 +77,7 @@ export default function DashboardPage() {
       setLoading(false)
     }
     fetchLogs()
-  }, [user, profile])
+  }, [user, profile, logsSavedAt])
 
   // ── Restart challenge ─────────────────────────────────────────────────────
   const handleRestart = async () => {
@@ -562,7 +562,7 @@ export default function DashboardPage() {
             onClick={() => setShowRestart(false)}>
             <motion.div initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
               transition={{ type: 'spring', damping: 25 }}
-              className="w-full bg-[#111] rounded-t-3xl p-6"
+              className="w-full bg-[#111] rounded-t-3xl p-6 pb-24"
               onClick={(e) => e.stopPropagation()}>
               <div className="flex items-center justify-between mb-4">
                 <h3 className="font-bold text-red-400 text-lg flex items-center gap-2">

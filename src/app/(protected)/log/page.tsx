@@ -14,7 +14,7 @@ import { Input } from '@/components/ui/input'
 import { toast } from 'sonner'
 
 export default function LogPage() {
-  const { user, profile } = useStore()
+  const { user, profile, markLogSaved } = useStore()
   const today = format(new Date(), 'yyyy-MM-dd')
   const bodyWeight = profile?.current_weight ?? 80
 
@@ -156,6 +156,7 @@ export default function LogPage() {
         .from('daily_logs')
         .upsert(payload, { onConflict: 'user_id,log_date' })
       if (error) throw error
+      markLogSaved()
       toast.success('تم الحفظ! 💪')
     } catch (err) {
       console.error('Log save error:', err)
