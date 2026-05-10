@@ -2,23 +2,65 @@
 
 import { useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { differenceInDays, format, startOfMonth, getDaysInMonth, getDay } from 'date-fns'
+import { addMonths, differenceInDays, format, startOfMonth, getDaysInMonth, getDay } from 'date-fns'
 import { ar } from 'date-fns/locale'
-import { Flame, Droplets, Footprints, Dumbbell, Target, TrendingUp, TrendingDown, ChevronLeft, ChevronRight, X } from 'lucide-react'
+import { Flame, Dumbbell, X, TrendingDown, TrendingUp, RotateCcw, Target } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useStore } from '@/store/useStore'
-import { DailyLog, DayCompliance, CHALLENGE_CRITERIA, WORKOUT_TYPES } from '@/types'
-import { buildCalendar, predictGoal, getWeeklyWorkoutCount } from '@/lib/compliance'
+import { DailyLog, DayCompliance, Profile } from '@/types'
+import { buildCalendar, getWeeklyWorkoutCount, smartPredict } from '@/lib/compliance'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { toast } from 'sonner'
 
+// ─── Mini SVG ring ────────────────────────────────────────────────────────────
+function Ring({
+  pct, color, label, sublabel,
+}: { pct: number; color: string; label: string; sublabel?: string }) {
+  const r = 14
+  const circ = 2 * Math.PI * r
+  const offset = circ * (1 - Math.min(pct, 100) / 100)
+  return (
+    <div className="flex flex-col items-center gap-1">
+      <svg width="40" height="40" viewBox="0 0 36 36" className="-rotate-90">
+        <circle cx="18" cy="18" r={r} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="3" />
+        <circle
+          cx="18" cy="18" r={r} fill="none" stroke={color} strokeWidth="3"
+          strokeDasharray={`${circ - offset} ${offset}`} strokeLinecap="round"
+        />
+      </svg>
+      <p className="text-white text-[10px] font-black -mt-8 leading-none">{Math.round(pct)}%</p>
+      <div className="mt-4 text-center">
+        <p className="text-gray-300 text-[10px] font-medium">{label}</p>
+        {sublabel && <p className="text-gray-500 text-[9px]">{sublabel}</p>}
+      </div>
+    </div>
+  )
+}
+
+// ─── Day label helpers ────────────────────────────────────────────────────────
+const DAY_SHORT = ['أح', 'إث', 'ثل', 'أر', 'خم', 'جم', 'سب']
+
+function getLastNDays(n: number): string[] {
+  return Array.from({ length: n }, (_, i) => {
+    const d = new Date()
+    d.setDate(d.getDate() - (n - 1 - i))
+    return format(d, 'yyyy-MM-dd')
+  })
+}
+
+// ─── Page ─────────────────────────────────────────────────────────────────────
 export default function DashboardPage() {
-  const { user, profile, streak } = useStore()
+  const { user, profile, streak, setProfile } = useStore()
   const [logs, setLogs] = useState<DailyLog[]>([])
   const [calendar, setCalendar] = useState<DayCompliance[]>([])
   const [calMonth, setCalMonth] = useState(new Date())
   const [selectedDay, setSelectedDay] = useState<DayCompliance | null>(null)
   const [loading, setLoading] = useState(true)
+  const [showRestart, setShowRestart] = useState(false)
+  const [restartConfirm, setRestartConfirm] = useState('')
+  const [restarting, setRestarting] = useState(false)
   const today = format(new Date(), 'yyyy-MM-dd')
 
   useEffect(() => {
@@ -36,6 +78,34 @@ export default function DashboardPage() {
     }
     fetchLogs()
   }, [user, profile])
+
+  // ── Restart challenge ─────────────────────────────────────────────────────
+  const handleRestart = async () => {
+    if (restartConfirm !== 'إعادة التحدي') {
+      toast.error('اكتب النص الصحيح للتأكيد')
+      return
+    }
+    setRestarting(true)
+    try {
+      const startDate = format(new Date(), 'yyyy-MM-dd')
+      const endDate = format(addMonths(new Date(), 4), 'yyyy-MM-dd')
+      const { error } = await supabase
+        .from('profiles')
+        .update({ challenge_start_date: startDate, challenge_end_date: endDate })
+        .eq('id', user!.id)
+      if (error) throw error
+      setProfile({ ...(profile as Profile), challenge_start_date: startDate, challenge_end_date: endDate })
+      setLogs([])
+      setCalendar([])
+      setShowRestart(false)
+      setRestartConfirm('')
+      toast.success('تم إعادة التحدي! يلا من الأول 💪')
+    } catch (err) {
+      toast.error(`خطأ: ${err instanceof Error ? err.message : 'حاول مرة ثانية'}`)
+    } finally {
+      setRestarting(false)
+    }
+  }
 
   if (loading) return (
     <div className="flex items-center justify-center h-screen bg-[#0A0A0A]">
@@ -66,26 +136,34 @@ export default function DashboardPage() {
 
   const todayLog = logs.find((l) => l.log_date === today)
   const weeklyWorkouts = getWeeklyWorkoutCount(logs)
-  const prediction = profile.current_weight && profile.goal_weight && endDate
-    ? predictGoal(logs, profile.current_weight, profile.goal_weight, endDate)
-    : null
+  const prediction = smartPredict(logs, profile)
 
   const greenDays = calendar.filter((d) => d.color === 'green').length
   const yellowDays = calendar.filter((d) => d.color === 'yellow').length
   const redDays = calendar.filter((d) => d.color === 'red').length
 
-  // Calendar rendering
+  // ── Calendar ──────────────────────────────────────────────────────────────
   const monthStart = startOfMonth(calMonth)
   const daysInMonth = getDaysInMonth(calMonth)
-  const startDayOfWeek = (getDay(monthStart) + 6) % 7 // Monday-first
+  const startDayOfWeek = (getDay(monthStart) + 6) % 7
   const monthStr = format(calMonth, 'yyyy-MM')
   const calendarDayMap = new Map(calendar.map((d) => [d.date, d]))
 
-  const colorClass = { green: 'bg-[#39FF14]', yellow: 'bg-yellow-400', red: 'bg-red-500', none: 'bg-white/10' }
+  const cellColor: Record<string, string> = {
+    green:  'bg-[#39FF14]/25 border-[#39FF14]/30 text-[#39FF14]',
+    yellow: 'bg-yellow-400/20 border-yellow-400/30 text-yellow-300',
+    red:    'bg-red-500/20 border-red-500/30 text-red-400',
+    none:   'bg-white/5 border-white/10 text-gray-500',
+  }
+
+  // ── 7-day ring data ───────────────────────────────────────────────────────
+  const last7 = getLastNDays(7)
+  const logMap = new Map(logs.map((l) => [l.log_date, l]))
 
   return (
     <div className="min-h-screen bg-[#0A0A0A] pb-28">
-      {/* Header */}
+
+      {/* ── Header ── */}
       <div className="px-4 pt-12 pb-2">
         <p className="text-gray-400 text-sm">{format(new Date(), 'EEEE، d MMMM yyyy', { locale: ar })}</p>
         <h1 className="text-2xl font-black text-white mt-1">
@@ -94,7 +172,8 @@ export default function DashboardPage() {
       </div>
 
       <div className="px-4 space-y-4 mt-3">
-        {/* Countdown */}
+
+        {/* ── Countdown ── */}
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
           className="card-dark rounded-2xl p-5 relative overflow-hidden">
           <div className="absolute inset-0 bg-gradient-to-br from-[#39FF14]/5 to-transparent" />
@@ -121,10 +200,8 @@ export default function DashboardPage() {
                   <span className="text-sm font-black text-[#39FF14]">{progressPct}%</span>
                 </div>
               </div>
-              <p className="text-gray-500 text-xs mt-1">مكتمل</p>
             </div>
           </div>
-          {/* Progress bar */}
           <div className="mt-4 h-1.5 bg-white/10 rounded-full overflow-hidden relative z-10">
             <motion.div initial={{ width: 0 }} animate={{ width: `${progressPct}%` }}
               transition={{ duration: 1.5, ease: 'easeOut' }}
@@ -132,39 +209,86 @@ export default function DashboardPage() {
           </div>
         </motion.div>
 
-        {/* Challenge Rules */}
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.1 }}
+        {/* ── Steps — 7-day rings ── */}
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.05 }}
           className="card-dark rounded-2xl p-4">
-          <h3 className="font-bold text-white mb-3 flex items-center gap-2">
-            <Target className="w-4 h-4 text-[#39FF14]" /> شروط التحدي الأسبوعية
-          </h3>
-          <div className="grid grid-cols-2 gap-2">
-            {[
-              { label: 'تمرين حديد', target: '4-5 أيام/أسبوع', current: weeklyWorkouts.gym, max: 5, color: '#39FF14' },
-              { label: 'كارديو', target: '5-7 أيام/أسبوع', current: weeklyWorkouts.cardio, max: 7, color: '#38BDF8' },
-              { label: 'خطوات يومية', target: '10,000+', current: todayLog?.steps || 0, max: 10000, color: '#A78BFA' },
-              { label: 'ماء يومي', target: '3 لتر+', current: Math.min((todayLog?.water_ml || 0) / 1000, 3), max: 3, color: '#34D399' },
-            ].map((item) => {
-              const pct = Math.min((item.current / item.max) * 100, 100)
-              const ok = item.current >= item.max
+          <div className="flex items-center gap-2 mb-3">
+            <span className="text-lg">👟</span>
+            <p className="text-white font-bold text-sm">الخطوات اليومية</p>
+            <span className="text-gray-500 text-xs mr-auto">هدف 10,000</span>
+          </div>
+          <div className="flex justify-between">
+            {last7.map((date) => {
+              const log = logMap.get(date)
+              const pct = Math.min(((log?.steps || 0) / 10000) * 100, 100)
+              const dayOfWeek = new Date(date).getDay()
+              const isToday = date === today
               return (
-                <div key={item.label} className="bg-white/5 rounded-xl p-3">
-                  <div className="flex items-center justify-between mb-1">
-                    <p className="text-xs text-gray-400">{item.label}</p>
-                    <span className={`text-xs font-bold ${ok ? 'text-[#39FF14]' : 'text-gray-500'}`}>{ok ? '✓' : item.target}</span>
-                  </div>
-                  <div className="h-1.5 bg-white/10 rounded-full overflow-hidden">
-                    <motion.div animate={{ width: `${pct}%` }} transition={{ duration: 0.8 }}
-                      className="h-full rounded-full" style={{ background: item.color }} />
-                  </div>
-                </div>
+                <Ring
+                  key={date}
+                  pct={pct}
+                  color={pct >= 100 ? '#39FF14' : pct >= 50 ? '#A78BFA' : '#374151'}
+                  label={DAY_SHORT[dayOfWeek]}
+                  sublabel={isToday ? 'اليوم' : undefined}
+                />
               )
             })}
           </div>
         </motion.div>
 
-        {/* Compliance Summary */}
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.15 }}
+        {/* ── Water — 7-day rings ── */}
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.08 }}
+          className="card-dark rounded-2xl p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <span className="text-lg">💧</span>
+            <p className="text-white font-bold text-sm">الماء اليومي</p>
+            <span className="text-gray-500 text-xs mr-auto">هدف 3L</span>
+          </div>
+          <div className="flex justify-between">
+            {last7.map((date) => {
+              const log = logMap.get(date)
+              const pct = Math.min(((log?.water_ml || 0) / 3000) * 100, 100)
+              const dayOfWeek = new Date(date).getDay()
+              const isToday = date === today
+              return (
+                <Ring
+                  key={date}
+                  pct={pct}
+                  color={pct >= 100 ? '#39FF14' : pct >= 50 ? '#38BDF8' : '#374151'}
+                  label={DAY_SHORT[dayOfWeek]}
+                  sublabel={isToday ? 'اليوم' : undefined}
+                />
+              )
+            })}
+          </div>
+        </motion.div>
+
+        {/* ── Weekly Workout Summary ── */}
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.1 }}
+          className="grid grid-cols-2 gap-2">
+          {[
+            { label: 'تمرين حديد', target: 'هدف 4-5/أسبوع', current: weeklyWorkouts.gym, max: 5, color: '#39FF14' },
+            { label: 'كارديو', target: 'هدف 5-7/أسبوع', current: weeklyWorkouts.cardio, max: 7, color: '#38BDF8' },
+          ].map((item) => {
+            const pct = Math.min((item.current / item.max) * 100, 100)
+            return (
+              <div key={item.label} className="card-dark rounded-2xl p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-gray-400 text-xs">{item.label}</p>
+                  <span className="font-black text-white text-lg">{item.current}</span>
+                </div>
+                <div className="h-1.5 bg-white/10 rounded-full overflow-hidden">
+                  <motion.div animate={{ width: `${pct}%` }} transition={{ duration: 0.8 }}
+                    className="h-full rounded-full" style={{ background: item.color }} />
+                </div>
+                <p className="text-gray-500 text-xs mt-1">{item.target}</p>
+              </div>
+            )
+          })}
+        </motion.div>
+
+        {/* ── Compliance Summary ── */}
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.12 }}
           className="grid grid-cols-3 gap-2">
           {[
             { label: 'أيام خضراء', count: greenDays, color: '#39FF14', bg: 'bg-[#39FF14]/10' },
@@ -178,102 +302,120 @@ export default function DashboardPage() {
           ))}
         </motion.div>
 
-        {/* Calendar */}
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.2 }}
+        {/* ── Calendar (colored cells) ── */}
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.15 }}
           className="card-dark rounded-2xl p-4">
           <div className="flex items-center justify-between mb-3">
             <button onClick={() => setCalMonth((m) => new Date(m.getFullYear(), m.getMonth() - 1))}
-              className="p-1 text-gray-400 hover:text-white"><ChevronRight className="w-5 h-5" /></button>
+              className="p-1 text-gray-400 hover:text-white text-lg">›</button>
             <h3 className="font-bold text-white text-sm">
               {format(calMonth, 'MMMM yyyy', { locale: ar })}
             </h3>
             <button onClick={() => setCalMonth((m) => new Date(m.getFullYear(), m.getMonth() + 1))}
-              className="p-1 text-gray-400 hover:text-white"><ChevronLeft className="w-5 h-5" /></button>
+              className="p-1 text-gray-400 hover:text-white text-lg">‹</button>
           </div>
 
-          {/* Day labels */}
-          <div className="grid grid-cols-7 mb-2">
+          <div className="grid grid-cols-7 mb-1">
             {['إث', 'ثل', 'أر', 'خم', 'جم', 'سب', 'أح'].map((d) => (
-              <div key={d} className="text-center text-gray-600 text-xs py-1">{d}</div>
+              <div key={d} className="text-center text-gray-600 text-[10px] py-1">{d}</div>
             ))}
           </div>
 
-          {/* Day cells */}
           <div className="grid grid-cols-7 gap-1">
             {Array.from({ length: startDayOfWeek }).map((_, i) => <div key={`e-${i}`} />)}
             {Array.from({ length: daysInMonth }).map((_, i) => {
               const day = i + 1
               const dateStr = `${monthStr}-${String(day).padStart(2, '0')}`
               const dayData = calendarDayMap.get(dateStr)
-              const isToday = dateStr === today
               const dot = dayData?.color || 'none'
+              const isToday = dateStr === today
               const isFuture = dateStr > today
 
               return (
                 <motion.button
                   key={day}
-                  whileTap={{ scale: 0.85 }}
-                  onClick={() => dayData && setSelectedDay(dayData)}
-                  className={`aspect-square rounded-lg flex flex-col items-center justify-center gap-0.5 relative
-                    ${isToday ? 'ring-1 ring-[#39FF14]' : ''}
-                    ${isFuture ? 'opacity-30' : 'cursor-pointer hover:bg-white/5'}
+                  whileTap={{ scale: 0.88 }}
+                  onClick={() => dayData?.log && setSelectedDay(dayData)}
+                  disabled={isFuture || !dayData?.log}
+                  className={`aspect-square rounded-lg border text-xs font-bold flex items-center justify-center transition-all
+                    ${cellColor[dot]}
+                    ${isToday ? 'ring-2 ring-white/60 ring-offset-1 ring-offset-[#0A0A0A]' : ''}
+                    ${isFuture ? 'opacity-20' : dayData?.log ? 'cursor-pointer hover:brightness-125' : 'cursor-default'}
                   `}
                 >
-                  <span className={`text-xs ${isToday ? 'text-[#39FF14] font-bold' : 'text-gray-300'}`}>{day}</span>
-                  {!isFuture && (
-                    <div className={`w-1.5 h-1.5 rounded-full ${colorClass[dot]}`} />
-                  )}
+                  {day}
                 </motion.button>
               )
             })}
           </div>
 
-          {/* Legend */}
           <div className="flex items-center justify-center gap-4 mt-3 pt-3 border-t border-white/5">
             {[['bg-[#39FF14]', '≥80%'], ['bg-yellow-400', '40-79%'], ['bg-red-500', '<40%']].map(([c, l]) => (
               <div key={l} className="flex items-center gap-1.5">
-                <div className={`w-2.5 h-2.5 rounded-full ${c}`} />
+                <div className={`w-2.5 h-2.5 rounded-sm ${c}`} />
                 <span className="text-xs text-gray-500">{l}</span>
               </div>
             ))}
           </div>
         </motion.div>
 
-        {/* Prediction */}
+        {/* ── Smart Prediction ── */}
         {prediction && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.3 }}
-            className={`rounded-2xl p-5 border ${prediction.onTrack ? 'bg-[#39FF14]/8 border-[#39FF14]/30' : 'bg-red-500/8 border-red-500/30'}`}>
-            <div className="flex items-center gap-3">
-              {prediction.onTrack
-                ? <TrendingDown className="w-6 h-6 text-[#39FF14] flex-shrink-0" />
-                : <TrendingUp className="w-6 h-6 text-red-400 flex-shrink-0" />}
-              <div>
-                <p className={`font-bold ${prediction.onTrack ? 'text-[#39FF14]' : 'text-red-400'}`}>
-                  {prediction.onTrack ? '🎯 أنت على المسار الصح!' : '⚠️ مش على المسار!'}
-                </p>
-                <p className="text-gray-400 text-xs mt-1">
-                  بناءً على أدائك ({prediction.avgCompliance}% التزام متوسط)،
-                  وزنك المتوقع بنهاية التحدي:{' '}
-                  <span className="font-bold text-white">{prediction.projectedWeight} kg</span>
-                  {' '}(الهدف: {profile.goal_weight} kg)
-                </p>
-              </div>
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.2 }}
+            className="card-dark rounded-2xl p-4">
+            <div className="flex items-center gap-2 mb-1">
+              <Target className="w-4 h-4 text-[#39FF14]" />
+              <h3 className="font-bold text-white text-sm">توقعات الوزن</h3>
+              <span className={`mr-auto text-xs font-bold px-2 py-0.5 rounded-full ${
+                prediction.onTrack ? 'bg-[#39FF14]/20 text-[#39FF14]' : 'bg-red-500/20 text-red-400'
+              }`}>
+                {prediction.onTrack ? '✅ على المسار' : '⚠️ مش على المسار'}
+              </span>
             </div>
+            <p className="text-gray-500 text-xs mb-3">
+              متوسط العجز اليومي: <span className="text-white font-bold">{prediction.avgDailyDeficit}</span> سعرة •
+              التزام: <span className="text-white font-bold">{prediction.avgCompliance}%</span>
+            </p>
+
+            <div className="grid grid-cols-2 gap-2">
+              {prediction.projections.map((proj) => {
+                const reached = proj.projectedWeight <= (profile.goal_weight! + 1.5)
+                const close = proj.projectedWeight <= (profile.goal_weight! + 4)
+                const color = reached ? 'text-[#39FF14]' : close ? 'text-yellow-300' : 'text-red-400'
+                const bg = reached ? 'bg-[#39FF14]/10 border-[#39FF14]/20' : close ? 'bg-yellow-400/10 border-yellow-400/20' : 'bg-red-500/10 border-red-500/20'
+                return (
+                  <div key={proj.label} className={`rounded-xl border p-3 ${bg}`}>
+                    <p className="text-gray-400 text-xs">{proj.label}</p>
+                    <p className={`font-black text-lg ${color}`}>{proj.projectedWeight} <span className="text-xs font-normal">kg</span></p>
+                    <p className="text-gray-500 text-xs">-{proj.weightLoss} kg</p>
+                  </div>
+                )
+              })}
+            </div>
+
+            {profile.goal_weight && (
+              <p className="text-center text-gray-500 text-xs mt-3">
+                الهدف: <span className="text-white font-bold">{profile.goal_weight} kg</span> •
+                الوزن الحالي: <span className="text-white font-bold">{profile.current_weight} kg</span>
+              </p>
+            )}
           </motion.div>
         )}
 
-        {/* Today's Log CTA */}
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.35 }}>
+        {/* ── Today's Log CTA ── */}
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.25 }}>
           <Link href="/log">
-            <Button className={`w-full h-14 font-bold text-base rounded-2xl ${todayLog ? 'bg-white/10 text-white hover:bg-white/20' : 'bg-[#39FF14] text-black hover:bg-[#39FF14]/90 neon-glow'}`}>
+            <Button className={`w-full h-14 font-bold text-base rounded-2xl ${
+              todayLog ? 'bg-white/10 text-white hover:bg-white/20' : 'bg-[#39FF14] text-black hover:bg-[#39FF14]/90 neon-glow'
+            }`}>
               {todayLog ? '✏️ تعديل سجل اليوم' : '📝 سجل يومك الآن!'}
             </Button>
           </Link>
         </motion.div>
 
-        {/* Streak */}
+        {/* ── Streak ── */}
         {streak && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.4 }}
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.28 }}
             className="card-dark rounded-2xl p-4 flex items-center gap-4">
             <div className="w-12 h-12 rounded-xl bg-orange-500/20 flex items-center justify-center flex-shrink-0">
               <Flame className="w-6 h-6 text-orange-400" />
@@ -288,9 +430,20 @@ export default function DashboardPage() {
             </div>
           </motion.div>
         )}
+
+        {/* ── Restart Challenge ── */}
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.3 }}>
+          <button
+            onClick={() => setShowRestart(true)}
+            className="w-full py-3 rounded-2xl border border-red-500/20 bg-red-500/5 text-red-400 text-sm font-medium flex items-center justify-center gap-2 hover:bg-red-500/10 transition-all"
+          >
+            <RotateCcw className="w-4 h-4" /> إعادة التحدي من الصفر
+          </button>
+        </motion.div>
+
       </div>
 
-      {/* Day Detail Modal */}
+      {/* ── Day Detail Modal ── */}
       <AnimatePresence>
         {selectedDay && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
@@ -304,7 +457,9 @@ export default function DashboardPage() {
                 <h3 className="font-bold text-white text-lg">
                   {format(new Date(selectedDay.date), 'EEEE، d MMMM', { locale: ar })}
                 </h3>
-                <button onClick={() => setSelectedDay(null)} className="text-gray-400"><X className="w-5 h-5" /></button>
+                <button onClick={() => setSelectedDay(null)} className="text-gray-400">
+                  <X className="w-5 h-5" />
+                </button>
               </div>
 
               {selectedDay.log ? (
@@ -316,27 +471,64 @@ export default function DashboardPage() {
                   }`}>
                     نقاط الالتزام: {selectedDay.score}%
                   </div>
+
                   {[
                     { label: `سعرات (${(selectedDay.log.calories_consumed || 0).toLocaleString()})`, done: (selectedDay.log.calories_consumed || 0) > 0 },
-                    { label: `ماء (${((selectedDay.log.water_ml || 0) / 1000).toFixed(1)} لتر)`, done: (selectedDay.log.water_ml || 0) >= 3000 },
+                    { label: `ماء (${((selectedDay.log.water_ml || 0) / 1000).toFixed(1)} L)`, done: (selectedDay.log.water_ml || 0) >= 3000 },
                     { label: `خطوات (${(selectedDay.log.steps || 0).toLocaleString()})`, done: (selectedDay.log.steps || 0) >= 10000 },
                     { label: 'تمرين', done: selectedDay.log.workout_completed },
+                    { label: 'مكملات', done: selectedDay.log.supplements_taken },
                   ].map((item) => (
                     <div key={item.label} className="flex items-center justify-between bg-white/5 rounded-xl p-3">
                       <span className="text-sm text-gray-300">{item.label}</span>
                       <span>{item.done ? '✅' : '❌'}</span>
                     </div>
                   ))}
+
                   {(selectedDay.log.workout_data?.types?.length ?? 0) > 0 && (
                     <div className="bg-white/5 rounded-xl p-3">
                       <p className="text-xs text-gray-400 mb-1">التمرين</p>
                       <p className="text-white text-sm">{selectedDay.log.workout_data!.types.join(' • ')}</p>
+                      {selectedDay.log.workout_data?.duration_minutes && (
+                        <p className="text-gray-500 text-xs mt-1">
+                          {selectedDay.log.workout_data.exercises_count} تمرين • {selectedDay.log.workout_data.duration_minutes} دقيقة
+                          {selectedDay.log.workout_data.estimated_calories_burned
+                            ? ` • ~${selectedDay.log.workout_data.estimated_calories_burned} سعرة`
+                            : ''}
+                        </p>
+                      )}
                     </div>
                   )}
-                  {selectedDay.log.workout_data?.cardio_type && (
+
+                  {/* New multi-session cardio */}
+                  {(selectedDay.log.workout_data?.cardio_sessions?.length ?? 0) > 0 &&
+                    selectedDay.log.workout_data!.cardio_sessions!.map((s, i) => (
+                      <div key={i} className="bg-white/5 rounded-xl p-3">
+                        <p className="text-xs text-gray-400 mb-1">كارديو {i + 1}</p>
+                        <p className="text-white text-sm">{s.type} — {s.duration} دقيقة</p>
+                        {s.calories_burned > 0 && (
+                          <p className="text-gray-500 text-xs">~{s.calories_burned} سعرة</p>
+                        )}
+                      </div>
+                    ))
+                  }
+
+                  {/* Legacy single-session cardio fallback */}
+                  {!(selectedDay.log.workout_data?.cardio_sessions?.length) &&
+                    selectedDay.log.workout_data?.cardio_type && (
                     <div className="bg-white/5 rounded-xl p-3">
                       <p className="text-xs text-gray-400 mb-1">الكارديو</p>
-                      <p className="text-white text-sm">{selectedDay.log.workout_data.cardio_type} — {selectedDay.log.workout_data.cardio_duration} دقيقة</p>
+                      <p className="text-white text-sm">
+                        {selectedDay.log.workout_data.cardio_type} — {selectedDay.log.workout_data.cardio_duration} دقيقة
+                      </p>
+                    </div>
+                  )}
+
+                  {(selectedDay.log.calories_burned || 0) > 0 && (
+                    <div className="bg-orange-500/10 rounded-xl p-3 text-center">
+                      <p className="text-orange-300 text-sm">
+                        🔥 إجمالي محروق: ~<span className="font-black">{selectedDay.log.calories_burned}</span> سعرة
+                      </p>
                     </div>
                   )}
                 </div>
@@ -345,6 +537,62 @@ export default function DashboardPage() {
                   <p>ما في سجل لهذا اليوم</p>
                 </div>
               )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Restart Confirmation Modal ── */}
+      <AnimatePresence>
+        {showRestart && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-end"
+            onClick={() => setShowRestart(false)}>
+            <motion.div initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
+              transition={{ type: 'spring', damping: 25 }}
+              className="w-full bg-[#111] rounded-t-3xl p-6"
+              onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-bold text-red-400 text-lg flex items-center gap-2">
+                  <RotateCcw className="w-5 h-5" /> إعادة التحدي
+                </h3>
+                <button onClick={() => setShowRestart(false)} className="text-gray-400">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-4 mb-4">
+                <p className="text-red-300 text-sm font-medium mb-1">⚠️ تحذير</p>
+                <p className="text-gray-400 text-sm">
+                  بيتم إعادة تاريخ بداية التحدي لليوم، وبتبدأ من يوم 1. السجلات القديمة بتنحفظ بس ما رح تظهر في الداشبورد.
+                </p>
+              </div>
+
+              <p className="text-gray-400 text-sm mb-2">اكتب <span className="text-white font-bold">إعادة التحدي</span> للتأكيد:</p>
+              <Input
+                value={restartConfirm}
+                onChange={(e) => setRestartConfirm(e.target.value)}
+                placeholder="إعادة التحدي"
+                className="bg-white/5 border-white/10 text-white h-12 mb-4 text-right"
+                dir="rtl"
+              />
+
+              <div className="flex gap-3">
+                <Button
+                  onClick={() => setShowRestart(false)}
+                  variant="outline"
+                  className="flex-1 h-12 border-white/20 text-gray-300"
+                >
+                  إلغاء
+                </Button>
+                <Button
+                  onClick={handleRestart}
+                  disabled={restartConfirm !== 'إعادة التحدي' || restarting}
+                  className="flex-1 h-12 bg-red-500 hover:bg-red-600 text-white font-bold disabled:opacity-40"
+                >
+                  {restarting ? 'جاري...' : '🔄 إعادة التحدي'}
+                </Button>
+              </div>
             </motion.div>
           </motion.div>
         )}

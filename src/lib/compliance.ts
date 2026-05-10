@@ -1,4 +1,5 @@
-import { DailyLog, DayCompliance, CHALLENGE_CRITERIA } from '@/types'
+import { differenceInDays } from 'date-fns'
+import { DailyLog, DayCompliance, CHALLENGE_CRITERIA, Profile } from '@/types'
 
 export function calcDayScore(log: DailyLog): number {
   const criteria = [
@@ -43,37 +44,89 @@ export function buildCalendar(logs: DailyLog[], startDate: string): DayComplianc
   return days
 }
 
-export function predictGoal(
-  logs: DailyLog[],
-  currentWeight: number,
-  goalWeight: number,
-  endDate: string
-): { onTrack: boolean; projectedWeight: number; avgCompliance: number } {
-  const recent = logs.slice(0, 14)
-  if (recent.length === 0) return { onTrack: false, projectedWeight: currentWeight, avgCompliance: 0 }
-
-  const avgCompliance = recent.reduce((s, l) => s + calcDayScore(l), 0) / recent.length
-  const deficitDays = recent.filter((l) => (l.calories_consumed || 0) > 0).length
-  const avgDeficitRate = deficitDays / recent.length
-
-  const daysLeft = Math.ceil((new Date(endDate).getTime() - Date.now()) / 86400000)
-  // 500 cal/day deficit ≈ 0.5kg/week loss
-  const weeklyLoss = avgDeficitRate * 0.5
-  const projectedLoss = (daysLeft / 7) * weeklyLoss
-  const projectedWeight = Math.max(goalWeight - 2, currentWeight - projectedLoss)
-
-  const totalWeightToLose = currentWeight - goalWeight
-  const onTrack = projectedLoss >= totalWeightToLose * 0.8
-
-  return { onTrack, projectedWeight: Math.round(projectedWeight * 10) / 10, avgCompliance: Math.round(avgCompliance) }
-}
-
 export function getWeeklyWorkoutCount(logs: DailyLog[]): { gym: number; cardio: number } {
   const weekAgo = new Date()
   weekAgo.setDate(weekAgo.getDate() - 7)
   const recent = logs.filter((l) => new Date(l.log_date) >= weekAgo)
   return {
     gym: recent.filter((l) => l.workout_completed).length,
-    cardio: recent.filter((l) => (l.workout_data?.cardio_duration ?? 0) > 0).length,
+    cardio: recent.filter((l) => (l.workout_data?.cardio_sessions?.length ?? 0) > 0).length,
+  }
+}
+
+// ─── Smart Prediction ───────────────────────────────────────────────────────
+
+export interface SmartProjection {
+  label: string
+  days: number
+  projectedWeight: number
+  weightLoss: number
+}
+
+export interface SmartPredictResult {
+  onTrack: boolean
+  avgDailyDeficit: number
+  avgCompliance: number
+  projections: SmartProjection[]
+}
+
+export function smartPredict(logs: DailyLog[], profile: Profile): SmartPredictResult | null {
+  const currentWeight = profile.current_weight
+  const goalWeight = profile.goal_weight
+  const tdee = profile.tdee
+
+  if (!currentWeight || !goalWeight || !tdee) return null
+
+  // Only use days where calories were actually logged
+  const logsWithData = logs.filter((l) => (l.calories_consumed || 0) > 0)
+  if (logsWithData.length === 0) return null
+
+  const avgDailyDeficit =
+    logsWithData.reduce((sum, l) => {
+      const burned = l.calories_burned || 0
+      return sum + (tdee - l.calories_consumed + burned)
+    }, 0) / logsWithData.length
+
+  // Cap at a sane range: -300 (slight surplus) to 1500 (aggressive deficit)
+  const cappedDeficit = Math.max(-300, Math.min(avgDailyDeficit, 1500))
+  const lossPerDay = cappedDeficit / 7700
+
+  const endDate = profile.challenge_end_date
+    ? new Date(profile.challenge_end_date)
+    : new Date(Date.now() + 120 * 86400000)
+  const daysLeft = Math.max(0, differenceInDays(endDate, new Date()))
+
+  const timeframes = [
+    { label: 'بعد أسبوعين', days: 14 },
+    { label: 'بعد شهر', days: 30 },
+    { label: 'بعد 3 أشهر', days: 90 },
+    { label: 'نهاية التحدي', days: daysLeft },
+  ]
+
+  const projections: SmartProjection[] = timeframes.map(({ label, days }) => {
+    const weightLoss = Math.max(0, lossPerDay * days)
+    const projectedWeight = Math.max(goalWeight - 5, currentWeight - weightLoss)
+    return {
+      label,
+      days,
+      projectedWeight: Math.round(projectedWeight * 10) / 10,
+      weightLoss: Math.round(weightLoss * 10) / 10,
+    }
+  })
+
+  const endProjection = projections[projections.length - 1]
+  const onTrack = endProjection.projectedWeight <= goalWeight + 1.5
+
+  const recent14 = logs.slice(0, 14)
+  const avgCompliance =
+    recent14.length > 0
+      ? recent14.reduce((s, l) => s + calcDayScore(l), 0) / recent14.length
+      : 0
+
+  return {
+    onTrack,
+    avgDailyDeficit: Math.round(cappedDeficit),
+    avgCompliance: Math.round(avgCompliance),
+    projections,
   }
 }

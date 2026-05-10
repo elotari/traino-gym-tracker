@@ -12,10 +12,21 @@ export interface Profile {
   created_at: string
 }
 
+export interface CardioSession {
+  type: string
+  duration: number
+  calories_burned: number
+}
+
 export interface WorkoutData {
   types: string[]
-  cardio_type: string | null
-  cardio_duration: number | null
+  exercises_count?: number | null
+  duration_minutes?: number | null
+  estimated_calories_burned?: number | null
+  cardio_sessions?: CardioSession[]
+  // legacy single-session fields (keep for backward compat)
+  cardio_type?: string | null
+  cardio_duration?: number | null
 }
 
 export interface DailyLog {
@@ -49,7 +60,7 @@ export interface Streak {
 
 export interface DayCompliance {
   date: string
-  score: number // 0-100
+  score: number
   color: 'green' | 'yellow' | 'red' | 'none'
   log: DailyLog | null
 }
@@ -75,22 +86,36 @@ export const CHALLENGE_CRITERIA = {
 }
 
 export const WORKOUT_TYPES = [
-  { id: 'chest', label: 'صدر 💪', emoji: '💪' },
-  { id: 'back', label: 'ظهر 🔙', emoji: '🔙' },
-  { id: 'legs', label: 'رجلين 🦵', emoji: '🦵' },
-  { id: 'shoulders', label: 'أكتاف 🏋️', emoji: '🏋️' },
-  { id: 'arms', label: 'أيدي 💥', emoji: '💥' },
-  { id: 'core', label: 'بطن 🔥', emoji: '🔥' },
-  { id: 'fullbody', label: 'جسم كامل ⚡', emoji: '⚡' },
-  { id: 'rest', label: 'راحة 😴', emoji: '😴' },
+  { id: 'chest',     label: 'صدر',    emoji: '💪' },
+  { id: 'back',      label: 'ظهر',    emoji: '🔙' },
+  { id: 'core',      label: 'معدة',   emoji: '🔥' },
+  { id: 'triceps',   label: 'تراي',   emoji: '💥' },
+  { id: 'biceps',    label: 'باي',    emoji: '🦾' },
+  { id: 'shoulders', label: 'أكتاف',  emoji: '🏋️' },
+  { id: 'legs',      label: 'رجلين',  emoji: '🦵' },
+  { id: 'glutes',    label: 'مؤخرة',  emoji: '🍑' },
+  { id: 'rest',      label: 'راحة',   emoji: '😴' },
 ]
 
 export const CARDIO_TYPES = [
-  'جري 🏃', 'مشي سريع 🚶', 'دراجة 🚴', 'سباحة 🏊',
-  'حبل قفز 🪢', 'إليبتيكال ♾️', 'HIIT ⚡', 'تسلق درج 🪜',
+  'جري 🏃',
+  'مشي سريع 🚶',
+  'دراجة 🚴',
+  'سباحة 🏊',
+  'حبل قفز 🪢',
+  'إليبتيكال ♾️',
+  'HIIT ⚡',
+  'تسلق درج 🪜',
 ]
 
 export const SUPPLEMENTS = [
-  'Creatine 🔴', 'Whey Protein 🥛', 'Multivitamin 💊',
-  'Omega-3 🐟', 'Vitamin D ☀️', 'Pre-Workout 🔥', 'BCAA 💪',
+  'Creatine 🔴',
+  'Whey Protein 🥛',
+  'Multivitamin 💊',
+  'Omega-3 🐟',
+  'Vitamin D ☀️',
+  'Pre-Workout 🔥',
+  'BCAA 💪',
+  'Calcium 🦴',
+  'Zinc ⚡',
 ]
