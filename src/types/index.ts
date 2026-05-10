@@ -12,23 +12,29 @@ export interface Profile {
   created_at: string
 }
 
+export interface WorkoutData {
+  types: string[]
+  cardio_type: string | null
+  cardio_duration: number | null
+}
+
 export interface DailyLog {
   id: string
   user_id: string
   log_date: string
-  // Challenge criteria
-  calorie_deficit_achieved: boolean
-  water_goal_achieved: boolean
+  calories_consumed: number
+  calories_burned: number
   steps: number
-  sleep_good: boolean
-  // Workout
-  workout_types: string[]
-  cardio_type: string | null
-  cardio_duration: number | null
-  // Supplements
+  water_ml: number
+  workout_completed: boolean
+  workout_data: WorkoutData | null
+  meals: string | null
   supplements_taken: boolean
   supplement_list: string[]
   notes: string | null
+  weight_kg: number | null
+  body_fat_percentage: number | null
+  muscle_mass_kg: number | null
   created_at: string
 }
 

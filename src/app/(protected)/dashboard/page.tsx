@@ -143,7 +143,7 @@ export default function DashboardPage() {
               { label: 'تمرين حديد', target: '4-5 أيام/أسبوع', current: weeklyWorkouts.gym, max: 5, color: '#39FF14' },
               { label: 'كارديو', target: '5-7 أيام/أسبوع', current: weeklyWorkouts.cardio, max: 7, color: '#38BDF8' },
               { label: 'خطوات يومية', target: '10,000+', current: todayLog?.steps || 0, max: 10000, color: '#A78BFA' },
-              { label: 'ماء يومي', target: '3 لتر+', current: todayLog?.water_goal_achieved ? 3 : 0, max: 3, color: '#34D399' },
+              { label: 'ماء يومي', target: '3 لتر+', current: Math.min((todayLog?.water_ml || 0) / 1000, 3), max: 3, color: '#34D399' },
             ].map((item) => {
               const pct = Math.min((item.current / item.max) * 100, 100)
               const ok = item.current >= item.max
@@ -317,26 +317,26 @@ export default function DashboardPage() {
                     نقاط الالتزام: {selectedDay.score}%
                   </div>
                   {[
-                    { label: 'عجز السعرات ≥500', done: selectedDay.log.calorie_deficit_achieved },
-                    { label: 'شرب الماء 3L+', done: selectedDay.log.water_goal_achieved },
-                    { label: `خطوات (${(selectedDay.log.steps || 0).toLocaleString()})`, done: selectedDay.log.steps >= 10000 },
-                    { label: 'نوم كافي', done: selectedDay.log.sleep_good },
+                    { label: `سعرات (${(selectedDay.log.calories_consumed || 0).toLocaleString()})`, done: (selectedDay.log.calories_consumed || 0) > 0 },
+                    { label: `ماء (${((selectedDay.log.water_ml || 0) / 1000).toFixed(1)} لتر)`, done: (selectedDay.log.water_ml || 0) >= 3000 },
+                    { label: `خطوات (${(selectedDay.log.steps || 0).toLocaleString()})`, done: (selectedDay.log.steps || 0) >= 10000 },
+                    { label: 'تمرين', done: selectedDay.log.workout_completed },
                   ].map((item) => (
                     <div key={item.label} className="flex items-center justify-between bg-white/5 rounded-xl p-3">
                       <span className="text-sm text-gray-300">{item.label}</span>
                       <span>{item.done ? '✅' : '❌'}</span>
                     </div>
                   ))}
-                  {selectedDay.log.workout_types?.length > 0 && (
+                  {(selectedDay.log.workout_data?.types?.length ?? 0) > 0 && (
                     <div className="bg-white/5 rounded-xl p-3">
                       <p className="text-xs text-gray-400 mb-1">التمرين</p>
-                      <p className="text-white text-sm">{selectedDay.log.workout_types.join(' • ')}</p>
+                      <p className="text-white text-sm">{selectedDay.log.workout_data!.types.join(' • ')}</p>
                     </div>
                   )}
-                  {selectedDay.log.cardio_type && (
+                  {selectedDay.log.workout_data?.cardio_type && (
                     <div className="bg-white/5 rounded-xl p-3">
                       <p className="text-xs text-gray-400 mb-1">الكارديو</p>
-                      <p className="text-white text-sm">{selectedDay.log.cardio_type} — {selectedDay.log.cardio_duration} دقيقة</p>
+                      <p className="text-white text-sm">{selectedDay.log.workout_data.cardio_type} — {selectedDay.log.workout_data.cardio_duration} دقيقة</p>
                     </div>
                   )}
                 </div>

@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { format } from 'date-fns'
 import { ar } from 'date-fns/locale'
-import { Check, X, Plus, Minus, ChevronDown, ChevronUp } from 'lucide-react'
+import { Check, Plus, Minus, ChevronDown, ChevronUp } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useStore } from '@/store/useStore'
 import { DailyLog, WORKOUT_TYPES, CARDIO_TYPES, SUPPLEMENTS } from '@/types'
@@ -16,85 +16,96 @@ export default function LogPage() {
   const { user } = useStore()
   const today = format(new Date(), 'yyyy-MM-dd')
 
-  const [log, setLog] = useState<Partial<DailyLog>>({
-    calorie_deficit_achieved: false,
-    water_goal_achieved: false,
-    steps: 0,
-    sleep_good: false,
-    workout_types: [],
-    cardio_type: null,
-    cardio_duration: null,
-    supplements_taken: false,
-    supplement_list: [],
-  })
+  const [caloriesConsumed, setCaloriesConsumed] = useState(0)
+  const [waterMl, setWaterMl] = useState(0)
+  const [steps, setSteps] = useState(0)
+  const [workoutTypes, setWorkoutTypes] = useState<string[]>([])
+  const [cardioType, setCardioType] = useState<string | null>(null)
+  const [cardioDuration, setCardioDuration] = useState(0)
+  const [supplementList, setSupplementList] = useState<string[]>([])
+  const [notes, setNotes] = useState<string>('')
+
   const [saving, setSaving] = useState(false)
   const [showCardio, setShowCardio] = useState(false)
   const [showSupplements, setShowSupplements] = useState(false)
 
   useEffect(() => {
     if (!user) return
-    const fetch = async () => {
-      const { data } = await supabase.from('daily_logs').select('*')
-        .eq('user_id', user.id).eq('log_date', today).single()
-      if (data) {
-        setLog(data as DailyLog)
-        setShowCardio(!!(data as DailyLog).cardio_type)
-        setShowSupplements(!!(data as DailyLog).supplements_taken)
+    const fetchExisting = async () => {
+      const { data } = await supabase
+        .from('daily_logs')
+        .select('*')
+        .eq('user_id', user.id)
+        .eq('log_date', today)
+        .single()
+      if (!data) return
+      const log = data as DailyLog
+      setCaloriesConsumed(log.calories_consumed || 0)
+      setWaterMl(log.water_ml || 0)
+      setSteps(log.steps || 0)
+      setSupplementList(log.supplement_list || [])
+      setNotes(log.notes || '')
+      if (log.workout_data) {
+        setWorkoutTypes(log.workout_data.types || [])
+        setCardioType(log.workout_data.cardio_type || null)
+        setCardioDuration(log.workout_data.cardio_duration || 0)
+        setShowCardio(!!log.workout_data.cardio_type)
       }
+      setShowSupplements((log.supplement_list || []).length > 0)
     }
-    fetch()
+    fetchExisting()
   }, [user, today])
 
-  const set = (key: keyof DailyLog, val: unknown) => setLog((prev) => ({ ...prev, [key]: val }))
-
   const toggleWorkout = (id: string) => {
-    const curr = log.workout_types || []
-    set('workout_types', curr.includes(id) ? curr.filter((w) => w !== id) : [...curr, id])
+    setWorkoutTypes((prev) =>
+      prev.includes(id) ? prev.filter((w) => w !== id) : [...prev, id]
+    )
   }
 
   const toggleSupplement = (s: string) => {
-    const curr = log.supplement_list || []
-    const updated = curr.includes(s) ? curr.filter((x) => x !== s) : [...curr, s]
-    setLog((prev) => ({ ...prev, supplement_list: updated, supplements_taken: updated.length > 0 }))
+    setSupplementList((prev) =>
+      prev.includes(s) ? prev.filter((x) => x !== s) : [...prev, s]
+    )
   }
 
   const save = async () => {
-    if (!user) return
+    if (!user) {
+      toast.error('غير مسجل الدخول، حاول تسجل الدخول مرة ثانية')
+      return
+    }
     setSaving(true)
     try {
-      const { error } = await supabase.from('daily_logs').upsert(
-        { ...log, user_id: user.id, log_date: today },
-        { onConflict: 'user_id,log_date' }
-      )
+      const workoutCompleted = workoutTypes.length > 0 && !workoutTypes.includes('rest')
+      const payload = {
+        user_id: user.id,
+        log_date: today,
+        calories_consumed: caloriesConsumed,
+        calories_burned: 0,
+        steps,
+        water_ml: waterMl,
+        workout_completed: workoutCompleted,
+        workout_data: {
+          types: workoutTypes,
+          cardio_type: cardioType,
+          cardio_duration: cardioDuration || null,
+        },
+        supplements_taken: supplementList.length > 0,
+        supplement_list: supplementList,
+        notes: notes || null,
+      }
+      const { error } = await supabase.from('daily_logs').upsert(payload, {
+        onConflict: 'user_id,log_date',
+      })
       if (error) throw error
       toast.success('تم الحفظ! 💪')
-    } catch {
-      toast.error('خطأ في الحفظ')
+    } catch (err) {
+      console.error('Log save error:', err)
+      const msg = err instanceof Error ? err.message : JSON.stringify(err)
+      toast.error(`خطأ في الحفظ: ${msg}`)
     } finally {
       setSaving(false)
     }
   }
-
-  const YesNo = ({ label, emoji, value, onChange }: { label: string; emoji: string; value: boolean; onChange: (v: boolean) => void }) => (
-    <motion.div whileTap={{ scale: 0.98 }} className="card-dark rounded-2xl p-4">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <span className="text-2xl">{emoji}</span>
-          <p className="text-white font-medium text-sm">{label}</p>
-        </div>
-        <div className="flex gap-2">
-          <button onClick={() => onChange(true)}
-            className={`w-12 h-10 rounded-xl font-bold text-sm transition-all ${value ? 'bg-[#39FF14] text-black' : 'bg-white/10 text-gray-400 hover:bg-white/20'}`}>
-            نعم
-          </button>
-          <button onClick={() => onChange(false)}
-            className={`w-12 h-10 rounded-xl font-bold text-sm transition-all ${!value ? 'bg-red-500/40 text-red-300' : 'bg-white/10 text-gray-400 hover:bg-white/20'}`}>
-            لا
-          </button>
-        </div>
-      </div>
-    </motion.div>
-  )
 
   return (
     <div className="min-h-screen bg-[#0A0A0A] pb-28">
@@ -104,16 +115,77 @@ export default function LogPage() {
       </div>
 
       <div className="px-4 space-y-3">
-        {/* Yes/No Questions */}
-        <YesNo label="حققت عجز سعرات ≥500 عن احتياجك اليومي؟" emoji="🔥"
-          value={!!log.calorie_deficit_achieved}
-          onChange={(v) => set('calorie_deficit_achieved', v)} />
-        <YesNo label="شربت 3 لترات ماء اليوم أو أكثر؟" emoji="💧"
-          value={!!log.water_goal_achieved}
-          onChange={(v) => set('water_goal_achieved', v)} />
-        <YesNo label="نمت منيح أمس؟ (7+ ساعات)" emoji="😴"
-          value={!!log.sleep_good}
-          onChange={(v) => set('sleep_good', v)} />
+
+        {/* Calories Consumed */}
+        <motion.div whileTap={{ scale: 0.98 }} className="card-dark rounded-2xl p-4">
+          <div className="flex items-center gap-3 mb-3">
+            <span className="text-2xl">🔥</span>
+            <div>
+              <p className="text-white font-medium text-sm">كم سعرة أكلت اليوم؟</p>
+              <p className="text-gray-500 text-xs">الهدف: أقل من TDEE بـ 500 سعرة</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <button onClick={() => setCaloriesConsumed((v) => Math.max(0, v - 50))}
+              className="w-12 h-12 rounded-xl bg-white/10 flex items-center justify-center hover:bg-white/20 active:scale-95 transition-all">
+              <Minus className="w-4 h-4 text-white" />
+            </button>
+            <div className="flex-1">
+              <Input type="number" value={caloriesConsumed}
+                onChange={(e) => setCaloriesConsumed(Number(e.target.value))}
+                className="bg-white/5 border-white/10 text-white text-xl font-black h-12 text-center" />
+            </div>
+            <button onClick={() => setCaloriesConsumed((v) => v + 50)}
+              className="w-12 h-12 rounded-xl bg-[#39FF14]/20 flex items-center justify-center hover:bg-[#39FF14]/30 active:scale-95 transition-all">
+              <Plus className="w-4 h-4 text-[#39FF14]" />
+            </button>
+          </div>
+          <div className="flex gap-2 mt-3">
+            {[1500, 1800, 2000, 2500].map((n) => (
+              <button key={n} onClick={() => setCaloriesConsumed(n)}
+                className="flex-1 text-xs bg-white/5 border border-white/10 rounded-lg py-2 text-gray-300 hover:border-white/30 transition-all">
+                {n.toLocaleString()}
+              </button>
+            ))}
+          </div>
+        </motion.div>
+
+        {/* Water */}
+        <motion.div whileTap={{ scale: 0.98 }} className="card-dark rounded-2xl p-4">
+          <div className="flex items-center gap-3 mb-3">
+            <span className="text-2xl">💧</span>
+            <div>
+              <p className="text-white font-medium text-sm">كم شربت ماء؟</p>
+              <p className="text-gray-500 text-xs">الهدف: 3,000 مل (3 لتر)</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <button onClick={() => setWaterMl((v) => Math.max(0, v - 250))}
+              className="w-12 h-12 rounded-xl bg-white/10 flex items-center justify-center hover:bg-white/20 active:scale-95 transition-all">
+              <Minus className="w-4 h-4 text-white" />
+            </button>
+            <div className="flex-1 text-center">
+              <p className="text-white text-2xl font-black">{(waterMl / 1000).toFixed(1)} <span className="text-sm font-normal text-gray-400">لتر</span></p>
+              <p className="text-gray-500 text-xs">{waterMl} مل</p>
+            </div>
+            <button onClick={() => setWaterMl((v) => v + 250)}
+              className="w-12 h-12 rounded-xl bg-blue-500/20 flex items-center justify-center hover:bg-blue-500/30 active:scale-95 transition-all">
+              <Plus className="w-4 h-4 text-blue-400" />
+            </button>
+          </div>
+          <div className="mt-3 h-1.5 bg-white/10 rounded-full overflow-hidden">
+            <motion.div animate={{ width: `${Math.min((waterMl / 3000) * 100, 100)}%` }}
+              className={`h-full rounded-full ${waterMl >= 3000 ? 'bg-[#39FF14]' : 'bg-blue-400'}`} />
+          </div>
+          <div className="flex gap-2 mt-3">
+            {[500, 1000, 1500, 2000, 2500, 3000].map((n) => (
+              <button key={n} onClick={() => setWaterMl(n)}
+                className={`flex-1 text-xs border rounded-lg py-2 transition-all ${waterMl === n ? 'bg-blue-500/20 border-blue-400 text-blue-300' : 'bg-white/5 border-white/10 text-gray-300 hover:border-white/30'}`}>
+                {n >= 1000 ? `${n / 1000}L` : `${n}`}
+              </button>
+            ))}
+          </div>
+        </motion.div>
 
         {/* Steps */}
         <motion.div whileTap={{ scale: 0.98 }} className="card-dark rounded-2xl p-4">
@@ -125,31 +197,30 @@ export default function LogPage() {
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <button onClick={() => set('steps', Math.max(0, (log.steps || 0) - 500))}
+            <button onClick={() => setSteps((v) => Math.max(0, v - 500))}
               className="w-12 h-12 rounded-xl bg-white/10 flex items-center justify-center hover:bg-white/20 active:scale-95 transition-all">
               <Minus className="w-4 h-4 text-white" />
             </button>
-            <div className="flex-1 relative">
-              <Input type="number" value={log.steps || 0}
-                onChange={(e) => set('steps', Number(e.target.value))}
+            <div className="flex-1">
+              <Input type="number" value={steps}
+                onChange={(e) => setSteps(Number(e.target.value))}
                 className="bg-white/5 border-white/10 text-white text-xl font-black h-12 text-center" />
             </div>
-            <button onClick={() => set('steps', (log.steps || 0) + 500)}
+            <button onClick={() => setSteps((v) => v + 500)}
               className="w-12 h-12 rounded-xl bg-[#39FF14]/20 flex items-center justify-center hover:bg-[#39FF14]/30 active:scale-95 transition-all">
               <Plus className="w-4 h-4 text-[#39FF14]" />
             </button>
           </div>
           <div className="mt-2 h-1.5 bg-white/10 rounded-full overflow-hidden">
-            <motion.div animate={{ width: `${Math.min(((log.steps || 0) / 10000) * 100, 100)}%` }}
-              className={`h-full rounded-full ${(log.steps || 0) >= 10000 ? 'bg-[#39FF14]' : 'bg-blue-400'}`} />
+            <motion.div animate={{ width: `${Math.min((steps / 10000) * 100, 100)}%` }}
+              className={`h-full rounded-full ${steps >= 10000 ? 'bg-[#39FF14]' : 'bg-blue-400'}`} />
           </div>
           <p className="text-center text-xs text-gray-500 mt-1">
-            {(log.steps || 0) >= 10000 ? '🎉 وصلت الهدف!' : `${Math.max(0, 10000 - (log.steps || 0)).toLocaleString()} خطوة باقية`}
+            {steps >= 10000 ? '🎉 وصلت الهدف!' : `${Math.max(0, 10000 - steps).toLocaleString()} خطوة باقية`}
           </p>
-          {/* Quick Add */}
           <div className="flex gap-2 mt-3">
             {[1000, 2000, 5000].map((n) => (
-              <button key={n} onClick={() => set('steps', Math.min((log.steps || 0) + n, 50000))}
+              <button key={n} onClick={() => setSteps((v) => Math.min(v + n, 50000))}
                 className="flex-1 text-xs bg-white/5 border border-white/10 rounded-lg py-2 text-gray-300 hover:border-white/30 transition-all">
                 +{n.toLocaleString()}
               </button>
@@ -165,7 +236,7 @@ export default function LogPage() {
           </div>
           <div className="grid grid-cols-4 gap-2">
             {WORKOUT_TYPES.map((w) => {
-              const selected = (log.workout_types || []).includes(w.id)
+              const selected = workoutTypes.includes(w.id)
               return (
                 <motion.button key={w.id} whileTap={{ scale: 0.92 }} onClick={() => toggleWorkout(w.id)}
                   className={`py-2 px-1 rounded-xl text-center transition-all border ${
@@ -187,7 +258,7 @@ export default function LogPage() {
               <span className="text-2xl">🏃</span>
               <div className="text-right">
                 <p className="text-white font-medium text-sm">الكارديو</p>
-                {log.cardio_type && <p className="text-[#39FF14] text-xs">{log.cardio_type} — {log.cardio_duration} دقيقة</p>}
+                {cardioType && <p className="text-[#39FF14] text-xs">{cardioType} — {cardioDuration} دقيقة</p>}
               </div>
             </div>
             {showCardio ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
@@ -200,34 +271,34 @@ export default function LogPage() {
                 <div className="px-4 pb-4 space-y-3">
                   <div className="grid grid-cols-2 gap-2">
                     {CARDIO_TYPES.map((ct) => (
-                      <button key={ct} onClick={() => set('cardio_type', log.cardio_type === ct ? null : ct)}
+                      <button key={ct} onClick={() => setCardioType(cardioType === ct ? null : ct)}
                         className={`py-2 px-3 rounded-xl text-sm text-right transition-all border ${
-                          log.cardio_type === ct ? 'bg-blue-500/20 border-blue-400 text-blue-300' : 'bg-white/5 border-white/10 text-gray-400'
+                          cardioType === ct ? 'bg-blue-500/20 border-blue-400 text-blue-300' : 'bg-white/5 border-white/10 text-gray-400'
                         }`}>
                         {ct}
                       </button>
                     ))}
                   </div>
 
-                  {log.cardio_type && (
+                  {cardioType && (
                     <div>
                       <p className="text-gray-400 text-xs mb-2">المدة (بالدقائق)</p>
                       <div className="flex items-center gap-3">
-                        <button onClick={() => set('cardio_duration', Math.max(0, (log.cardio_duration || 0) - 5))}
+                        <button onClick={() => setCardioDuration((v) => Math.max(0, v - 5))}
                           className="w-12 h-10 rounded-xl bg-white/10 flex items-center justify-center">
                           <Minus className="w-4 h-4 text-white" />
                         </button>
-                        <Input type="number" value={log.cardio_duration || 0}
-                          onChange={(e) => set('cardio_duration', Number(e.target.value))}
+                        <Input type="number" value={cardioDuration}
+                          onChange={(e) => setCardioDuration(Number(e.target.value))}
                           className="flex-1 bg-white/5 border-white/10 text-white text-lg font-bold h-10 text-center" />
-                        <button onClick={() => set('cardio_duration', (log.cardio_duration || 0) + 5)}
+                        <button onClick={() => setCardioDuration((v) => v + 5)}
                           className="w-12 h-10 rounded-xl bg-blue-500/20 flex items-center justify-center">
                           <Plus className="w-4 h-4 text-blue-400" />
                         </button>
                       </div>
                       <div className="flex gap-2 mt-2">
                         {[20, 30, 45, 60].map((m) => (
-                          <button key={m} onClick={() => set('cardio_duration', m)}
+                          <button key={m} onClick={() => setCardioDuration(m)}
                             className="flex-1 text-xs bg-white/5 border border-white/10 rounded-lg py-1.5 text-gray-300 hover:border-white/30">
                             {m}د
                           </button>
@@ -249,8 +320,8 @@ export default function LogPage() {
               <span className="text-2xl">💊</span>
               <div className="text-right">
                 <p className="text-white font-medium text-sm">المكملات</p>
-                {(log.supplement_list?.length || 0) > 0 && (
-                  <p className="text-green-400 text-xs">{log.supplement_list?.length} مكمل</p>
+                {supplementList.length > 0 && (
+                  <p className="text-green-400 text-xs">{supplementList.length} مكمل</p>
                 )}
               </div>
             </div>
@@ -263,7 +334,7 @@ export default function LogPage() {
                 className="overflow-hidden">
                 <div className="px-4 pb-4 grid grid-cols-2 gap-2">
                   {SUPPLEMENTS.map((s) => {
-                    const checked = (log.supplement_list || []).includes(s)
+                    const checked = supplementList.includes(s)
                     return (
                       <button key={s} onClick={() => toggleSupplement(s)}
                         className={`py-2.5 px-3 rounded-xl text-sm text-right transition-all border flex items-center gap-2 ${

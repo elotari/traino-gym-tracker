@@ -2,11 +2,11 @@ import { DailyLog, DayCompliance, CHALLENGE_CRITERIA } from '@/types'
 
 export function calcDayScore(log: DailyLog): number {
   const criteria = [
-    log.calorie_deficit_achieved,
-    log.water_goal_achieved,
-    log.steps >= CHALLENGE_CRITERIA.stepsGoal,
-    log.sleep_good,
-    (log.workout_types?.length > 0 && !log.workout_types.includes('rest')) || (log.cardio_duration != null && log.cardio_duration > 0),
+    (log.calories_consumed || 0) > 0,
+    (log.water_ml || 0) >= CHALLENGE_CRITERIA.waterGoal,
+    (log.steps || 0) >= CHALLENGE_CRITERIA.stepsGoal,
+    log.workout_completed,
+    log.supplements_taken,
   ]
   const met = criteria.filter(Boolean).length
   return Math.round((met / criteria.length) * 100)
@@ -53,7 +53,7 @@ export function predictGoal(
   if (recent.length === 0) return { onTrack: false, projectedWeight: currentWeight, avgCompliance: 0 }
 
   const avgCompliance = recent.reduce((s, l) => s + calcDayScore(l), 0) / recent.length
-  const deficitDays = recent.filter((l) => l.calorie_deficit_achieved).length
+  const deficitDays = recent.filter((l) => (l.calories_consumed || 0) > 0).length
   const avgDeficitRate = deficitDays / recent.length
 
   const daysLeft = Math.ceil((new Date(endDate).getTime() - Date.now()) / 86400000)
@@ -73,7 +73,7 @@ export function getWeeklyWorkoutCount(logs: DailyLog[]): { gym: number; cardio: 
   weekAgo.setDate(weekAgo.getDate() - 7)
   const recent = logs.filter((l) => new Date(l.log_date) >= weekAgo)
   return {
-    gym: recent.filter((l) => l.workout_types?.length > 0 && !l.workout_types.includes('rest')).length,
-    cardio: recent.filter((l) => l.cardio_duration != null && l.cardio_duration > 0).length,
+    gym: recent.filter((l) => l.workout_completed).length,
+    cardio: recent.filter((l) => (l.workout_data?.cardio_duration ?? 0) > 0).length,
   }
 }
